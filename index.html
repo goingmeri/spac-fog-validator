@@ -47,6 +47,9 @@ button.vw{padding:7px 14px;border:2px solid var(--blue);border-radius:6px;backgr
 .pg canvas{width:100%;display:block}
 .hl{position:absolute;border:3px solid var(--no);background:rgba(179,38,30,.18);border-radius:3px}
 .hl.warn{border-color:#d99a00;background:rgba(255,210,0,.32)}
+.hl.ok{border-color:var(--ok);background:rgba(22,115,58,.16)}
+.hl.ok i{background:var(--ok);color:#fff}
+.sw.ok{background:rgba(22,115,58,.3);border:2px solid var(--ok)}
 .hl i{position:absolute;left:-3px;top:-3px;transform:translateY(-100%);font:700 12px/1 system-ui,sans-serif;font-style:normal;background:var(--no);color:#fff;padding:3px 6px;border-radius:3px;white-space:nowrap}
 .hl.warn i{background:#d99a00;color:#1b2430}
 .note{font-size:15px;color:var(--mut);padding:14px}
@@ -207,9 +210,9 @@ async function analyze(file,cfg){
     return{wrong:other?'This looks like a '+other.t+' form. Please switch to the '+other.t+' tab above.':'This does not look like a '+cfg.t+' form.'};
   }
   const rows=[];
-  if(cfg.date){const d=dateCheck(lines);rows.push({label:'Date',loc:d?null:locateRow(pages,/date\s*\/\s*time/i),status:d?'ok':'fail',msg:d?'Found: '+d:'No date found next to “Date / Time” in the header.'})}
+  if(cfg.date){const d=dateCheck(lines);rows.push({label:'Date',loc:locateRow(pages,/date\s*\/\s*time/i),status:d?'ok':'fail',msg:d?'Found: '+d:'No date found next to “Date / Time” in the header.'})}
   const r=revCheck(lines);
-  rows.push({label:'Revision Date',loc:r.d?null:locateRow(pages,/rev\.?\s*date/i),status:r.d?'ok':'fail',msg:r.d?'Found: '+r.d:(r.seen?'The Rev. Date field is empty.':'No Rev. No / Rev. Date field found.')});
+  rows.push({label:'Revision Date',loc:locateRow(pages,/rev\.?\s*date/i),status:r.d?'ok':'fail',msg:r.d?'Found: '+r.d:(r.seen?'The Rev. Date field is empty.':'No Rev. No / Rev. Date field found.')});
   const sg=await signatories(cfg,pages);
   return{rows,sg,pages};
 }
@@ -259,12 +262,12 @@ async function toggleView(btn){
   const id=+btn.dataset.i,res=RES[id],v=document.getElementById('v'+id);
   if(!v.hidden){v.hidden=true;btn.textContent='View file';return}
   v.hidden=false;btn.textContent='Hide file';
-  if(v.dataset.done){const f=v.querySelector('.hl');if(f)f.scrollIntoView({block:'center',behavior:'smooth'});return}
+  if(v.dataset.done){const f=v.querySelector('.hl.fail,.hl.warn')||v.querySelector('.hl');if(f)f.scrollIntoView({block:'center',behavior:'smooth'});return}
   v.innerHTML='<div class="busy">Loading the pages ...</div>';
-  const issues=[...res.rows,...res.sg].filter(x=>x.status!=='ok');
+  const all=[...res.rows,...res.sg],issues=all.filter(x=>x.status!=='ok');
   const frag=document.createDocumentFragment();
   const lg=document.createElement('p');lg.className='legend';
-  lg.innerHTML=issues.length?'<b>Highlighted:</b><span class="sw fail"></span>missing or failed<span class="sw warn"></span>please check':'<b>No problems found.</b> Nothing is highlighted.';
+  lg.innerHTML='<b>Highlighted:</b><span class="sw ok"></span>passed'+(issues.length?'<span class="sw fail"></span>missing or failed<span class="sw warn"></span>please check':'')+(issues.length?'':'<br><b>No problems found.</b>');
   frag.appendChild(lg);
   const lost=issues.filter(x=>!x.loc);
   if(lost.length){const n=document.createElement('p');n.className='legend';n.textContent='Could not point to a spot on the page for: '+lost.map(x=>x.label).join(', ')+'.';frag.appendChild(n)}
@@ -275,18 +278,18 @@ async function toggleView(btn){
     c.getContext('2d').drawImage(p.cv,0,0,c.width,c.height);
     const lab=document.createElement('p');lab.className='pgl';lab.textContent='Page '+(i+1)+' of '+res.pages.length;
     const wrap=document.createElement('div');wrap.className='pg';wrap.appendChild(c);
-    for(const x of issues){
+    for(const x of all){
       if(!x.loc||x.loc.pi!==i)continue;
       const h=document.createElement('div');h.className='hl '+x.status;
       const L=Math.max(0,x.loc.x),T=Math.max(0,x.loc.y);
       h.style.left=(L/p.vp.width*100)+'%';h.style.top=(T/p.vp.height*100)+'%';
       h.style.width=(Math.min(x.loc.w,p.vp.width-L)/p.vp.width*100)+'%';h.style.height=(Math.min(x.loc.h,p.vp.height-T)/p.vp.height*100)+'%';
-      const t=document.createElement('i');t.textContent=x.label;h.appendChild(t);wrap.appendChild(h);
+      const t=document.createElement('i');t.textContent=(x.status==='ok'?'\u2713 ':'')+x.label;h.appendChild(t);wrap.appendChild(h);
     }
     frag.appendChild(lab);frag.appendChild(wrap);
   }
   v.innerHTML='';v.appendChild(frag);v.dataset.done='1';
-  const f=v.querySelector('.hl');if(f)f.scrollIntoView({block:'center',behavior:'smooth'});
+  const f=v.querySelector('.hl.fail,.hl.warn')||v.querySelector('.hl');if(f)f.scrollIntoView({block:'center',behavior:'smooth'});
 }
 document.addEventListener('click',e=>{
   if(e.target.classList.contains('vw')){toggleView(e.target);return}if(e.target.classList.contains('cp')){const ta=e.target.previousElementSibling;ta.select();try{navigator.clipboard.writeText(ta.value)}catch(_){document.execCommand('copy')}e.target.textContent='Copied'}});
