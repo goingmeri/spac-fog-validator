@@ -24,6 +24,7 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 40px}
 .card{background:var(--card);border:1px solid var(--bd);border-radius:6px;margin-top:18px;overflow:hidden}
 .hd{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:14px;border-bottom:1px solid var(--bd);flex-wrap:wrap;background:#f8fafc}
 .fn{font-weight:700;word-break:break-all}
+.fl{display:block;font-size:13px;font-weight:400;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
 .badge{padding:5px 12px;border-radius:4px;font-weight:700;font-size:15px}
 .badge.ok{background:var(--ok);color:#fff}.badge.fail{background:var(--no);color:#fff}.badge.warn{background:var(--yel);color:#1b2430}
 .row{display:flex;gap:12px;padding:12px 14px;border-bottom:1px solid var(--bd)}
@@ -34,6 +35,20 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 40px}
 .rm{padding:14px;background:#f8fafc}
 .rm textarea{width:100%;min-height:80px;border:1px solid var(--bd);border-radius:6px;background:#fff;color:var(--tx);font:inherit;font-size:15px;padding:10px;resize:vertical}
 button.cp{margin-top:10px;padding:12px 20px;border:0;border-radius:6px;background:var(--blue);color:#fff;font:inherit;font-weight:700;cursor:pointer}
+.act{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+button.vw{padding:7px 14px;border:2px solid var(--blue);border-radius:6px;background:#fff;color:var(--blue);font:inherit;font-size:15px;font-weight:700;cursor:pointer}
+.viewer{padding:14px;background:#e4e9f0;border-top:1px solid var(--bd)}
+.legend{font-size:15px;color:var(--mut);margin:0 0 12px}
+.legend b{color:var(--tx)}
+.sw{display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:-2px;margin:0 4px 0 8px}
+.sw.fail{background:rgba(179,38,30,.3);border:2px solid var(--no)}.sw.warn{background:rgba(255,210,0,.45);border:2px solid #d99a00}
+.pgl{font-size:14px;color:var(--mut);margin:0 0 4px;text-align:center}
+.pg{position:relative;margin:0 auto 18px;background:#fff;border:1px solid var(--bd);box-shadow:0 1px 4px rgba(0,0,0,.15)}
+.pg canvas{width:100%;display:block}
+.hl{position:absolute;border:3px solid var(--no);background:rgba(179,38,30,.18);border-radius:3px}
+.hl.warn{border-color:#d99a00;background:rgba(255,210,0,.32)}
+.hl i{position:absolute;left:-3px;top:-3px;transform:translateY(-100%);font:700 12px/1 system-ui,sans-serif;font-style:normal;background:var(--no);color:#fff;padding:3px 6px;border-radius:3px;white-space:nowrap}
+.hl.warn i{background:#d99a00;color:#1b2430}
 .note{font-size:15px;color:var(--mut);padding:14px}
 .busy{padding:16px;color:var(--mut)}
 </style></head>
@@ -89,13 +104,28 @@ async function render(p){
   await p.page.render({canvasContext:cv.getContext('2d',{willReadFrequently:true}),viewport:p.vp}).promise;
   p.cv=cv;
 }
-function linesOf(boxes){
+function rowsOf(boxes){
   const rows=[];
   for(const b of [...boxes].sort((a,c)=>a.base-c.base||a.x-c.x)){
     const r=rows.find(r=>Math.abs(r.y-b.base)<b.h*0.6);
     r?r.items.push(b):rows.push({y:b.base,items:[b]});
   }
-  return rows.sort((a,c)=>a.y-c.y).map(r=>r.items.sort((a,c)=>a.x-c.x).map(i=>i.str).join(' '));
+  return rows.sort((a,c)=>a.y-c.y).map(r=>{const items=r.items.sort((a,c)=>a.x-c.x);return{items,str:items.map(i=>i.str).join(' ')}});
+}
+function linesOf(boxes){return rowsOf(boxes).map(r=>r.str)}
+function locateRow(pages,re){
+  for(let pi=0;pi<pages.length;pi++){
+    for(const r of rowsOf(pages[pi].boxes)){
+      const m=r.str.match(re);if(!m)continue;
+      let pos=0;const its=[];
+      for(const it of r.items){if(pos+it.str.length>m.index)its.push(it);pos+=it.str.length+1}
+      if(!its.length)continue;
+      const x=Math.min(...its.map(i=>i.x)),y=Math.min(...its.map(i=>i.y)),x2=Math.max(...its.map(i=>i.x+i.w)),y2=Math.max(...its.map(i=>i.y+i.h));
+      const cap=0.35*pages[pi].vp.width;
+      return{pi,x:x-4,y:y-4,w:Math.min(x2-x,cap)+8,h:y2-y+8};
+    }
+  }
+  return null;
 }
 function nameOf(s){
   for(const r of DATE_RES)s=s.replace(new RegExp(r.source,'gi'),' ');
@@ -145,10 +175,11 @@ async function signatories(cfg,pages){
       const r=await ocr(c2);
       if(r&&r.words){const n=nameOf(r.words.filter(x=>x.confidence>=55&&/[A-Za-z]{2,}/.test(x.text)).map(x=>x.text).join(' '));if(n){name=n;src='image (OCR)'}}
     }
-    if(name&&sig)out.push({label,status:'ok',msg:name+', signed.'});
-    else if(name)out.push({label,status:'fail',msg:name+' is printed but no signature was found.'});
-    else if(sig)out.push({label,status:'warn',msg:ocrDead?'A signature is there, but the name is a picture and could not be read automatically. Please check it yourself.':'A signature is there, but the name could not be read. Please check it yourself.'});
-    else out.push({label,status:'fail',msg:'No name and no signature found.'});
+    const loc={pi:pages.indexOf(p),x:x0,y:y0,w:x1-x0,h:y1-y0};
+    if(name&&sig)out.push({loc,label,status:'ok',msg:name+', signed.'});
+    else if(name)out.push({loc,label,status:'fail',msg:name+' is printed but no signature was found.'});
+    else if(sig)out.push({loc,label,status:'warn',msg:ocrDead?'A signature is there, but the name is a picture and could not be read automatically. Please check it yourself.':'A signature is there, but the name could not be read. Please check it yourself.'});
+    else out.push({loc,label,status:'fail',msg:'No name and no signature found.'});
   }
   return out;
 }
@@ -176,31 +207,34 @@ async function analyze(file,cfg){
     return{wrong:other?'This looks like a '+other.t+' form. Please switch to the '+other.t+' tab above.':'This does not look like a '+cfg.t+' form.'};
   }
   const rows=[];
-  if(cfg.date){const d=dateCheck(lines);rows.push({label:'Date',status:d?'ok':'fail',msg:d?'Found: '+d:'No date found next to “Date / Time” in the header.'})}
+  if(cfg.date){const d=dateCheck(lines);rows.push({label:'Date',loc:d?null:locateRow(pages,/date\s*\/\s*time/i),status:d?'ok':'fail',msg:d?'Found: '+d:'No date found next to “Date / Time” in the header.'})}
   const r=revCheck(lines);
-  rows.push({label:'Revision Date',status:r.d?'ok':'fail',msg:r.d?'Found: '+r.d:(r.seen?'The Rev. Date field is empty.':'No Rev. No / Rev. Date field found.')});
+  rows.push({label:'Revision Date',loc:r.d?null:locateRow(pages,/rev\.?\s*date/i),status:r.d?'ok':'fail',msg:r.d?'Found: '+r.d:(r.seen?'The Rev. Date field is empty.':'No Rev. No / Rev. Date field found.')});
   const sg=await signatories(cfg,pages);
-  return{rows,sg};
+  return{rows,sg,pages};
 }
 function worst(a){return a.includes('fail')?'fail':a.includes('warn')?'warn':'ok'}
-function buildRemark(cfg,res){
+function buildRemark(file,cfg,res){
   const sgS=worst(res.sg.map(s=>s.status)),all=worst([...res.rows.map(r=>r.status),sgS]);
   const issues=[...res.rows,...res.sg.map(s=>({label:'Signatory '+s.label,status:s.status,msg:s.msg}))].filter(x=>x.status!=='ok').map(x=>x.label+': '+x.msg);
-  const head=cfg.t+' validation: '+(all==='ok'?'PASSED':all==='warn'?'NEEDS REVIEW':'FAILED')+'.';
+  const head=cfg.t+' validation for '+file.name+': '+(all==='ok'?'PASSED':all==='warn'?'NEEDS REVIEW':'FAILED')+'.';
   if(all==='ok')return head+' '+res.rows.map(r=>r.label+' '+r.msg.replace('Found: ','')).join('; ')+'; all '+res.sg.length+' signatories complete.';
   return head+' '+issues.join(' ');
 }
 const IC={ok:'✓',fail:'✗',warn:'!'};
 const rowH=(r,sub)=>'<div class="row '+r.status+(sub?' sub':'')+'"><span class="ic">'+IC[r.status]+'</span><div><b>'+esc(r.label)+'</b><div class="d">'+esc(r.msg)+'</div></div></div>';
+const RES=[];
 function card(file,cfg,res){
-  if(res.wrong)return '<div class="card"><div class="hd"><span class="fn">'+esc(file.name)+'</span><span class="badge warn">Wrong form</span></div><div class="note">'+esc(res.wrong)+'</div></div>';
+  if(res.wrong)return '<div class="card"><div class="hd"><span class="fn"><span class="fl">File uploaded</span>'+esc(file.name)+'</span><span class="badge warn">Wrong form</span></div><div class="note">'+esc(res.wrong)+'</div></div>';
   const sgS=worst(res.sg.map(s=>s.status)),all=worst([...res.rows.map(r=>r.status),sgS]);
-  const rem=buildRemark(cfg,res);
-  return '<div class="card"><div class="hd"><span class="fn">'+esc(file.name)+'</span><span class="badge '+all+'">'+(all==='ok'?'Passed':all==='warn'?'Please check':'Failed')+'</span></div>'
+  const rem=buildRemark(file,cfg,res);
+  const id=RES.push(res)-1;
+  return '<div class="card"><div class="hd"><span class="fn"><span class="fl">File uploaded</span>'+esc(file.name)+'</span><span class="act"><span class="badge '+all+'">'+(all==='ok'?'Passed':all==='warn'?'Please check':'Failed')+'</span><button class="vw" data-i="'+id+'">View file</button></span></div>'
     +res.rows.map(r=>rowH(r)).join('')
     +rowH({label:'Signatories',status:sgS,msg:res.sg.filter(s=>s.status==='ok').length+' of '+res.sg.length+' complete'})
     +res.sg.map(s=>rowH(s,1)).join('')
     +'<div class="rm"><b>Remark</b><textarea readonly>'+esc(rem)+'</textarea><button class="cp">Copy remark</button></div>'
+    +'<div class="viewer" id="v'+id+'" hidden></div>'
     +(ocrDead?'<div class="note">Some names are pictures and could not be read automatically here. Those are marked “Please check” so you can confirm them yourself.</div>':'')
     +'</div>';
 }
@@ -221,7 +255,41 @@ const dz=$('#drop');
 dz.ondragover=e=>{e.preventDefault();dz.classList.add('over')};
 dz.ondragleave=()=>dz.classList.remove('over');
 dz.ondrop=e=>{e.preventDefault();dz.classList.remove('over');const fs=[...e.dataTransfer.files].filter(f=>/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name));if(fs.length)run(fs)};
-document.addEventListener('click',e=>{if(e.target.classList.contains('cp')){const ta=e.target.previousElementSibling;ta.select();try{navigator.clipboard.writeText(ta.value)}catch(_){document.execCommand('copy')}e.target.textContent='Copied'}});
+async function toggleView(btn){
+  const id=+btn.dataset.i,res=RES[id],v=document.getElementById('v'+id);
+  if(!v.hidden){v.hidden=true;btn.textContent='View file';return}
+  v.hidden=false;btn.textContent='Hide file';
+  if(v.dataset.done){const f=v.querySelector('.hl');if(f)f.scrollIntoView({block:'center',behavior:'smooth'});return}
+  v.innerHTML='<div class="busy">Loading the pages ...</div>';
+  const issues=[...res.rows,...res.sg].filter(x=>x.status!=='ok');
+  const frag=document.createDocumentFragment();
+  const lg=document.createElement('p');lg.className='legend';
+  lg.innerHTML=issues.length?'<b>Highlighted:</b><span class="sw fail"></span>missing or failed<span class="sw warn"></span>please check':'<b>No problems found.</b> Nothing is highlighted.';
+  frag.appendChild(lg);
+  const lost=issues.filter(x=>!x.loc);
+  if(lost.length){const n=document.createElement('p');n.className='legend';n.textContent='Could not point to a spot on the page for: '+lost.map(x=>x.label).join(', ')+'.';frag.appendChild(n)}
+  for(let i=0;i<res.pages.length;i++){
+    const p=res.pages[i];await render(p);
+    const ratio=Math.min(1,1100/p.cv.width),c=document.createElement('canvas');
+    c.width=Math.round(p.cv.width*ratio);c.height=Math.round(p.cv.height*ratio);
+    c.getContext('2d').drawImage(p.cv,0,0,c.width,c.height);
+    const lab=document.createElement('p');lab.className='pgl';lab.textContent='Page '+(i+1)+' of '+res.pages.length;
+    const wrap=document.createElement('div');wrap.className='pg';wrap.appendChild(c);
+    for(const x of issues){
+      if(!x.loc||x.loc.pi!==i)continue;
+      const h=document.createElement('div');h.className='hl '+x.status;
+      const L=Math.max(0,x.loc.x),T=Math.max(0,x.loc.y);
+      h.style.left=(L/p.vp.width*100)+'%';h.style.top=(T/p.vp.height*100)+'%';
+      h.style.width=(Math.min(x.loc.w,p.vp.width-L)/p.vp.width*100)+'%';h.style.height=(Math.min(x.loc.h,p.vp.height-T)/p.vp.height*100)+'%';
+      const t=document.createElement('i');t.textContent=x.label;h.appendChild(t);wrap.appendChild(h);
+    }
+    frag.appendChild(lab);frag.appendChild(wrap);
+  }
+  v.innerHTML='';v.appendChild(frag);v.dataset.done='1';
+  const f=v.querySelector('.hl');if(f)f.scrollIntoView({block:'center',behavior:'smooth'});
+}
+document.addEventListener('click',e=>{
+  if(e.target.classList.contains('vw')){toggleView(e.target);return}if(e.target.classList.contains('cp')){const ta=e.target.previousElementSibling;ta.select();try{navigator.clipboard.writeText(ta.value)}catch(_){document.execCommand('copy')}e.target.textContent='Copied'}});
 setMode('spac');
 </script>
 </body></html>
