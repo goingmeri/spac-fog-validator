@@ -241,24 +241,51 @@ function card(file,cfg,res){
     +(ocrDead?'<div class="note">Some names are pictures and could not be read automatically here. Those are marked “Please check” so you can confirm them yourself.</div>':'')
     +'</div>';
 }
-async function run(files){
-  const cfg=CFG[mode],out=$('#out');out.innerHTML='';
+async function run(files,keep){
+  const cfg=CFG[mode],out=$('#out');if(!keep)out.innerHTML='';
   for(const f of files){
     const slot=document.createElement('div');slot.className='card busy';slot.textContent='Checking '+f.name+' ... this can take a few seconds.';out.appendChild(slot);
     try{
+      if(!window.pdfjsLib)throw{name:'NoPdfJs'};
       const res=await analyze(f,cfg);
       slot.outerHTML=card(f,cfg,res);
-    }catch(e){slot.className='card note';slot.textContent='Could not read '+f.name+'. Please make sure it is a PDF file.'}
+    }catch(e){
+      const m=String(e&&e.name||e);
+      slot.className='card note';
+      slot.textContent=
+        m==='NoPdfJs'?'The PDF reader could not load. Please check your internet connection and reload the page.'
+        :m==='PasswordException'?f.name+' is password-protected. Please remove the password and try again.'
+        :m==='InvalidPDFException'?f.name+' is not a valid PDF file, or it is damaged.'
+        :'Could not check '+f.name+'. Please try again or use a different file.';
+    }
   }
+}
+function handle(files){
+  const isPdf=f=>/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name);
+  const ok=files.filter(isPdf),bad=files.filter(f=>!isPdf(f)),out=$('#out');
+  out.innerHTML='';
+  for(const f of bad){
+    const n=document.createElement('div');n.className='card note';
+    n.textContent=f.name+' is not a PDF, so it was skipped. Please upload a PDF file.';
+    out.appendChild(n);
+  }
+  if(ok.length)run(ok,true);
 }
 function setMode(m){mode=m;document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.m===m));$('#crit').textContent=CFG[m].crit;$('#out').innerHTML=''}
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>setMode(t.dataset.m));
-$('#f').onchange=e=>{if(e.target.files.length)run([...e.target.files]);e.target.value=''};
+$('#f').onchange=e=>{if(e.target.files.length)handle([...e.target.files]);e.target.value=''};
 const dz=$('#drop');
 dz.ondragover=e=>{e.preventDefault();dz.classList.add('over')};
 dz.ondragleave=()=>dz.classList.remove('over');
-dz.ondrop=e=>{e.preventDefault();dz.classList.remove('over');const fs=[...e.dataTransfer.files].filter(f=>/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name));if(fs.length)run(fs)};
+dz.ondrop=e=>{e.preventDefault();dz.classList.remove('over');if(e.dataTransfer.files.length)handle([...e.dataTransfer.files])};
 async function toggleView(btn){
+  try{await toggleViewInner(btn)}
+  catch(e){
+    const v=document.getElementById('v'+(+btn.dataset.i));
+    if(v){v.hidden=false;v.dataset.done='';v.innerHTML='<div class="note">Could not show the pages of this file. Please click “Hide file” and try again.</div>'}
+  }
+}
+async function toggleViewInner(btn){
   const id=+btn.dataset.i,res=RES[id],v=document.getElementById('v'+id);
   if(!v.hidden){v.hidden=true;btn.textContent='View file';return}
   v.hidden=false;btn.textContent='Hide file';
